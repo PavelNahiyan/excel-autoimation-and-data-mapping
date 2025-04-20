@@ -1,0 +1,125 @@
+import sys
+import os
+from PyQt5.QtWidgets import (
+    QApplication, QWidget, QFileDialog, QLabel, QPushButton,
+    QTextEdit, QVBoxLayout, QHBoxLayout, QMessageBox
+)
+from PyQt5.QtGui import QFont
+from openpyxl import load_workbook
+import pandas as pd
+
+class ExcelBatchEditor(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Excel Batch Editor")
+        self.setGeometry(100, 100, 750, 500)
+        self.directory = ""
+        self.setup_interface()
+
+    def setup_interface(self):
+        layout = QVBoxLayout()
+
+        self.dir_label = QLabel("Folder: None Selected")
+        layout.addWidget(self.dir_label)
+
+        choose_btn = QPushButton("Browse Folder")
+        choose_btn.clicked.connect(self.browse_folder)
+        layout.addWidget(choose_btn)
+
+        preview_btn = QPushButton("Show File Preview")
+        preview_btn.clicked.connect(self.display_preview)
+        layout.addWidget(preview_btn)
+
+        self.instructions_box = QTextEdit()
+        self.instructions_box.setFont(QFont("Courier", 10))
+        layout.addWidget(self.instructions_box)
+
+        action_buttons = QHBoxLayout()
+        load_btn = QPushButton("Import Rules")
+        load_btn.clicked.connect(self.import_instructions)
+        action_buttons.addWidget(load_btn)
+
+        save_btn = QPushButton("Save Rules")
+        save_btn.clicked.connect(self.save_instructions)
+        action_buttons.addWidget(save_btn)
+
+        layout.addLayout(action_buttons)
+
+        run_btn = QPushButton("Execute Edits")
+        run_btn.clicked.connect(self.apply_edits)
+        layout.addWidget(run_btn)
+
+        self.setLayout(layout)
+
+    def browse_folder(self):
+        selected = QFileDialog.getExistingDirectory(self, "Choose Excel Folder")
+        if selected:
+            self.directory = selected
+            self.dir_label.setText(f"Folder: {selected}")
+
+    def display_preview(self):
+        xls_files = [f for f in os.listdir(self.directory) if f.endswith('.xlsx')]
+        if not xls_files:
+            QMessageBox.warning(self, "Alert", "No Excel files found.")
+            return
+
+        sample_file = os.path.join(self.directory, xls_files[0])
+        content = pd.read_excel(sample_file).head(8).to_string()
+        QMessageBox.information(self, "Sample Preview", content)
+
+    def import_instructions(self):
+        file_path, _ = QFileDialog.getOpenFileName(self, "Open Instructions File", "", "Text (*.txt)")
+        if file_path:
+            with open(file_path, 'r') as f:
+                self.instructions_box.setText(f.read())
+
+    def save_instructions(self):
+        file_path, _ = QFileDialog.getSaveFileName(self, "Save Instructions", "", "Text (*.txt)")
+        if file_path:
+            with open(file_path, 'w') as f:
+                f.write(self.instructions_box.toPlainText())
+
+    def apply_edits(self):
+        rules = self.instructions_box.toPlainText().splitlines()
+        xlsx_files = [f for f in os.listdir(self.directory) if f.endswith('.xlsx')]
+
+        for fname in xlsx_files:
+            full_path = os.path.join(self.directory, fname)
+            workbook = load_workbook(full_path)
+            worksheet = workbook.active
+
+            for command in rules:
+                command = command.strip()
+                if not command:
+                    continue
+
+                if ' = ' in command:
+                    try:
+                        target_cell, input_value = command.split(' = ', 1)
+                        worksheet[target_cell.strip()] = input_value.strip('"')
+                    except Exception:
+                        continue
+                elif command.lower().startswith('delete row'):
+                    try:
+                        target_row = int(command.split()[-1])
+                        worksheet.delete_rows(target_row)
+                    except Exception:
+                        continue
+                elif command.lower().startswith('rename sheet to'):
+                    new_title = command.split('to', 1)[1].strip()
+                    worksheet.title = new_title
+                elif command.lower() == 'save as copy':
+                    new_file = os.path.join(self.directory, f"copy_{fname}")
+                    workbook.save(new_file)
+                    continue
+
+            workbook.save(full_path)
+
+        QMessageBox.information(self, "Complete", "All specified changes have been made.")
+
+
+if __name__ == '__main__':
+    app = QApplication(sys.argv)
+    editor = ExcelBatchEditor()
+    editor.show()
+    sys.exit(app.exec_())
